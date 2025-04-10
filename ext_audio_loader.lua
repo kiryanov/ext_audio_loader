@@ -1,25 +1,21 @@
-audio_ext = ".mka .ogg .ac3"
-sub_ext = ".ass .srt"
-exclude_with = ".unwanted" -- skip qBittorrent dummy files
-
-is_linux = true
+aud_ext = ".mka .mp4a .aac .ogg .ac3 .dts"
+sub_ext = ".ass .ssa .srt .sub .jss"
 
 function descriptor()
 	return {
-		title = "Ext audio and subtitles loader",
+		title = "Autoload external audio tracks and subtitles",
 		author = "serfreeman1337",
-		shortdesc = "Autoload external audio track and subtitles",
-		description = "This script searches in folder for audio and subtitles for video and loads them",
-		url = "https://github.com/serfreeman1337/ext_audio_loader",
-		version = "1.1",
-		capabilities = {"input-listener"}
+		shortdesc = "EASL",
+		description = "This script searches for audio and subtitle files with the same name and loads them",
+		url = "https://github.com/kiryanov/ext_audio_loader",
+		version = "2.0",
+		capabilities = { "input-listener" }
 	}
 end
 
 function activate()
-	if os.getenv("OS") then
-		is_linux = false
-	end
+	slash = package.config:sub(1, 1)
+	is_unix = slash == "/"
 end
 
 function deactivate()
@@ -33,7 +29,6 @@ function input_changed()
 		return
 	end
 
-	-- lol what is this
 	if vlc.input.item():metas()["sf_autoloaded_from"] == "yes" then
 		return
 	end
@@ -41,14 +36,9 @@ function input_changed()
 	if vlc.input.item():metas()["sf_autoloaded"] == "yes" then
 		local itemid = vlc.input.item():metas()["sf_autoloaded_itemid"]
 
-		if not(itemid:len() == 0) then
+		if itemid ~= "" then
 			itemid = tonumber(itemid)
-
-			-- playlist order fix
-			-- vlc.playlist.move(vlc.playlist.current(), itemid)
 			vlc.playlist.delete(itemid)
-			vlc.playlist.sort("title")
-			-- vlc.playlist.sort("id")
 			vlc.input.item():set_meta("sf_autoloaded_itemid", "")
 		end
 
@@ -56,68 +46,42 @@ function input_changed()
 	end
 
 	local uri = vlc.strings.decode_uri(vlc.input.item():uri())
-
-	if not uri:match("file:///") then return end
-
-	local file = vlc.input.item():metas()["filename"]
-	local name = file:sub(0, (file:len() - getFileExtension(file):len()))
-
-	local dir = ""
-	if is_linux then
-		dir = uri:sub(8, (uri:len() - file:len()  - 1))
-	else
-		dir = uri:sub(9, (uri:len() - file:len() - 1))
+	if not uri:match("^file:///") then
+		return
 	end
-
-	local path = dir .. file;
-
+	vlc.msg.dbg("[EASL] Processing " .. uri)
+	local file = vlc.input.item():metas()["filename"]
+	local name = file:sub(0, (file:len() - get_file_ext(file):len()))
+	local dir = uri:sub(8 + (is_unix and 0 or 1), (uri:len() - file:len() - 1))
+	vlc.msg.dbg("[EASL] Using name " .. name)
+	vlc.msg.dbg("[EASL] Base path " .. dir)
 	local opts = {}
-	local found_audio = false
-	local found_sub = false
 
 	local r = search(dir, name)
 
 	if r ~= nil then
+		local fl = ""
 		for k, v in pairs(r) do
-			-- fix windows path
-			if not is_linux then v = v:gsub("/", "\\") end
-
-			if k == "extaudio" then
-				found_audio = true
-				table.insert(opts, "input-slave=" .. vlc.strings.make_uri(v))
-			elseif k == "subtitles" then
-				found_sub = true
-				table.insert(opts, "sub-file=" .. v)
+        		if k == "aud" then
+				for i, f in pairs(v) do
+					if not is_unix then f = f:gsub("/", slash) end
+                                        vlc.msg.dbg("[EASL] Injecting audio " .. f)
+					if fl ~= "" then fl = fl .. "#" end
+					fl = fl .. vlc.strings.make_uri(f)
+				end
+			elseif k == "sub" then
+				for i, f in pairs(v) do
+					if not is_unix then f = f:gsub("/", slash) end
+                                        vlc.msg.dbg("[EASL] Injecting subtitle " .. f)
+					if fl ~= "" then fl = fl .. "#" end
+					fl = fl .. vlc.strings.make_uri(f):gsub("^file:", "file/subtitle:")
+				end
 			end
 		end
-	end
-
-	if not found_audio and not found_sub then
+		table.insert(opts, "input-slave=" .. fl)
+	else
+                vlc.msg.dbg("[EASL] Nothing found")
 		return
-	end
-
-	-- count tracks so we can select our autoloaded ones
-	local total_audio = 0
-	local total_sub = 0
-	for k, v in pairs(vlc.input.item():info()) do
-		-- TODO: figure out how to get input streams info
-		if (v["Type"] == "Audio" or v["Тип"] == "Аудио") then
-			total_audio = total_audio + 1
-		elseif (v["Type"] == "Subtitle" or v["Тип"] == "Субтитры") then
-			total_sub = total_sub + 1
-		end
-	end
-
-	if found_sub then
-		-- select subtitles
-		table.insert(opts, "sub-track=" .. total_sub)
-	end
-
-	if found_audio then
-		-- what
-		if total_audio == 0 then total_audio = 1 end
-		-- select external audio track
-		table.insert(opts, "audio-track=" .. total_audio)
 	end
 
 	local item = {{
@@ -129,24 +93,22 @@ function input_changed()
 		}
 	}}
 
-	-- lol what is this
 	vlc.input.item():set_meta("sf_autoloaded_from", "yes")
-
 	vlc.playlist.add(item)
 end
 
-function getFileExtension(url)
+function get_file_ext(url)
 	return url:match("^.+(%..+)$")
 end
 
 function is_dir(path)
-	if is_linux then
-		local f = io.open(path, "r")
+	local f = vlc.io.open(path, "r")
+
+	if is_unix then
 		local ok, err, code = f:read(1)
 		f:close()
 		return code == 21
 	else -- dir is nil on windows
-		local f = vlc.io.open(path, "r")
 		if f == nil then
 			return true
 		else
@@ -158,51 +120,62 @@ end
 
 function is_matched(name, with)
 	for what in with:gmatch("%S+") do
-		if name:find(what, 0, true) ~= nil then
-			return true	end
+		if name:find(what, (name:len() - what:len()), true) ~= nil then
+			return true
+		end
 	end
 	return false
 end
 
 function search(dir, name)
 	local dr = vlc.io.readdir(dir)
-
 	if dr == nil then
 		return nil
 	end
-
 	local r = {}
 	local found = false
-	local path = ""
 
-	for k, content in pairs(dr) do
-		-- skip top level and excluded dirs
-		if content ~= "." and content ~= ".." and not is_matched(content, exclude_with) then
-			path = dir .. [[/]] .. content
+	for i, content in pairs(dr) do
+		-- skip entries starting with a dot
+		if content:sub(1, 1) ~= "." then
+			local path = dir .. "/" .. content
 
 			if not is_dir(path) then
 				-- look for file with the same name
 				if content:find(name, 0, true) then
-
-					-- search for external audio tracks
-					if is_matched(content, audio_ext) then
-						r["extaudio"] = path
+					if is_matched(content, aud_ext) then
 						found = true
+	                                        vlc.msg.dbg("[EASL] Found matching audio file: " .. path)
+                                                if r["aud"] == nil then
+							r["aud"] = {}
+						end
+						table.insert(r["aud"], path)
 					elseif is_matched(content, sub_ext) then
-						r["subtitles"] = path
 						found = true
+	                                        vlc.msg.dbg("[EASL] Found matching subtitle file: " .. path)
+                                                if r["sub"] == nil then
+							r["sub"] = {}
+						end
+						table.insert(r["sub"], path)
 					end
 				end
 			else -- recursive directory scan
 				local rr = search(path, name)
 
 				if rr ~= nil then
-					for k, v in pairs(rr) do r[k] = v end
-					found = true
+					for k, v in pairs(rr) do
+						for j, p in pairs(rr[k]) do
+							table.insert(r[k], p)
+						end
+					end
 				end
 			end
 		end
 	end
 
-	if found then return r else return nil end
+	if found then
+		return r
+	else
+		return nil
+	end
 end
