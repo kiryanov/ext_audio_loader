@@ -1,9 +1,8 @@
 ### Description
-VLC extension for autoload external audio tracks and subtitles shared with video file.
-Audio track and subtitles should have same name as video:
+VLC extension for autoload external audio tracks and subtitles. Audio tracks and subtitles must have the same name prefix as the video:
 * show_01.mkv
-* Your Dub\show_01.mka
-* Subs\Signs\show_01.ass
+* Your Dub\show_01_Dub.mka
+* Subs\Signs\show_01_Sub.ass
 
 This version is modified from the original, adding support for multiple files of both kinds.
 
