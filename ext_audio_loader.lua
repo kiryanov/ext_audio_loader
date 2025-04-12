@@ -3,7 +3,7 @@ sub_ext = ".ass .ssa .srt .sub .jss"
 
 function descriptor()
 	return {
-		title = "Autoload external audio tracks and subtitles",
+		title = "EASL",
 		author = "serfreeman1337",
 		shortdesc = "EASL",
 		description = "This script searches for audio and subtitle files with the same name and loads them",
